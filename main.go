@@ -36,7 +36,7 @@ var (
 		"162.159.198.0/24",
 	}
 	defaultRange6         = []string{
-		"2606:4700:103::/64",
+		"2606:4700:102::/48",
 	}
 	defaultBind           = "127.0.0.1:1080"
 	defaultConfigFile     = "./config.json"
@@ -58,17 +58,17 @@ func main() {
 	pingFlag := flag.Bool("ping", true, "Ping each candidate before connect")
 	rtt := flag.Bool("rtt", false, "placeholder flag, not used")
 	reserved := flag.String("reserved", "", "placeholder flag, not used")
-	dns := flag.String("dns", "", "placeholder flag, not used")
+	dns := flag.String("dns", "1.1.1.1", "DNS (default 1.1.1.1, can be changed)")
 	scanPerIP := flag.Duration("scan-timeout", 5*time.Second, "Per-endpoint scan timeout (dial+handshake)")
 	scanMax := flag.Int("scan-max", 30, "Maximum number of endpoints to try during scan")
 	scanVerboseChild := flag.Bool("scan-verbose-child", false, "Print MASQUE child process logs during scan")
 	scanTunnelFailLimit := flag.Int("scan-tunnel-fail-limit", 2, "Number of 'Failed to connect tunnel' occurrences before skipping an endpoint")
 	scanOrdered := flag.Bool("scan-ordered", false, "Scan candidates in CIDR order (disable shuffling)")
+	jahesh := flag.Bool("jahesh", false, "Perform in-tunnel re-registration and restart to get a fresh egress IP")
 	flag.Parse()
 
 	_ = rtt
 	_ = reserved
-	_ = dns
 	_ = defaultTestURL // silence unused if not used elsewhere
 
 	if *v4Flag && *v6Flag {
@@ -120,7 +120,7 @@ func main() {
 				}
 
 				// launch child (usque socks)
-				cmd := exec.Command(usquePath, "socks", "--config", configFile, "-b", bindIP, "-p", bindPort)
+				cmd := exec.Command(usquePath, "socks", "--config", configFile, "-b", bindIP, "-p", bindPort, "-d", *dns)
 				stdout, _ := cmd.StdoutPipe()
 				stderr, _ := cmd.StderrPipe()
 
@@ -200,6 +200,78 @@ func main() {
 			}
 			*endpoint = chosen
 		}
+	}
+
+	if *jahesh {
+		configFile := defaultConfigFile
+		usquePath := defaultUsquePath
+
+		if *endpoint == "" && !*scan {
+			logErrorAndExit("--endpoint is required for --jahesh")
+		}
+
+		// Ensure we have an identity
+		if needRegister(configFile, *renew) {
+			if err := runRegister(usquePath); err != nil {
+				logErrorAndExit(fmt.Sprintf("failed to register (initial): %v", err))
+			}
+			logInfo("initial identity created", nil)
+		}
+
+		// Load config and update endpoint fields
+		cfg := make(map[string]interface{})
+		if data, err := os.ReadFile(configFile); err == nil {
+			_ = json.Unmarshal(data, &cfg)
+		}
+		addEndpointToConfig(cfg, *endpoint)
+		if err := writeConfig(configFile, cfg); err != nil {
+			logErrorAndExit(fmt.Sprintf("failed to write config: %v", err))
+		}
+
+		// Start a temporary SOCKS on a free port to perform in-tunnel register
+		bindIP, bindPort := mustSplitBind(*bind)
+		tempPort, err := pickFreePort()
+		if err != nil {
+			logErrorAndExit(fmt.Sprintf("pick temp port: %v", err))
+		}
+
+		tmpCmd, st, err := startSocksOnce(usquePath, configFile, bindIP, tempPort, true /*verbose*/, 3 /*tunnelFailLimit*/)
+		if err != nil {
+			logErrorAndExit(fmt.Sprintf("failed to start temporary socks: %v", err))
+		}
+
+		ok := waitConnected(st, tmpCmd, 10*time.Second)
+		if !ok {
+			gracefulStop(tmpCmd, 1500*time.Millisecond)
+			logErrorAndExit("temporary tunnel not connected (timeout)")
+		}
+
+		// Register through the temporary SOCKS
+		socksAddr := bindIP + ":" + tempPort
+		if err := runRegisterViaSOCKS(usquePath, socksAddr); err != nil {
+			gracefulStop(tmpCmd, 1500*time.Millisecond)
+			logErrorAndExit(fmt.Sprintf("re-register via tunnel failed: %v", err))
+		}
+
+		// Stop temporary tunnel gracefully
+		gracefulStop(tmpCmd, 1500*time.Millisecond)
+		time.Sleep(250 * time.Millisecond) // let sockets settle
+
+		// Reload config (now renewed) and re-apply endpoint
+		cfg2 := make(map[string]interface{})
+		if data, err := os.ReadFile(configFile); err == nil {
+			_ = json.Unmarshal(data, &cfg2)
+		}
+		addEndpointToConfig(cfg2, *endpoint)
+		if err := writeConfig(configFile, cfg2); err != nil {
+			logErrorAndExit(fmt.Sprintf("failed to write config after jahesh: %v", err))
+		}
+
+		// Final SOCKS on the main --bind (fresh identity)
+		if err := runSocks(usquePath, configFile, bindIP, bindPort, *connectTimeout); err != nil {
+			logErrorAndExit(fmt.Sprintf("SOCKS start failed after jahesh: %v", err))
+		}
+		return
 	}
 
 	bindIP, bindPort := mustSplitBind(*bind)
@@ -325,6 +397,92 @@ func validatePort(p string) error {
 func writeConfig(path string, cfg map[string]interface{}) error {
 	data, _ := json.MarshalIndent(cfg, "", "  ")
 	return os.WriteFile(path, data, 0644)
+}
+
+func startSocksOnce(path, config, bindIP, bindPort string, logChild bool, tunnelFailLimit int) (*exec.Cmd, *procState, error) {
+    cmd := exec.Command(path, "socks", "--config", config, "-b", bindIP, "-p", bindPort)
+    stdout, err := cmd.StdoutPipe()
+    if err != nil { return nil, nil, err }
+    stderr, err := cmd.StderrPipe()
+    if err != nil { return nil, nil, err }
+    if err := cmd.Start(); err != nil { return nil, nil, err }
+
+    st := &procState{}
+    go handleScanner(bufio.NewScanner(stdout), bindIP+":"+bindPort, st, cmd, logChild, tunnelFailLimit)
+    go handleScanner(bufio.NewScanner(stderr), bindIP+":"+bindPort, st, cmd, logChild, tunnelFailLimit)
+    return cmd, st, nil
+}
+
+func waitConnected(st *procState, cmd *exec.Cmd, timeout time.Duration) bool {
+    deadline := time.Now().Add(timeout)
+    waitCh := make(chan error, 1)
+    go func() { waitCh <- cmd.Wait() }()
+    for time.Now().Before(deadline) {
+        select {
+        case <-time.After(120 * time.Millisecond):
+            st.mu.Lock()
+            ok := st.connected
+            hs := st.handshakeFail
+            st.mu.Unlock()
+            if ok { return true }
+            if hs { return false }
+        case err := <-waitCh:
+            _ = err
+            return false
+        }
+    }
+    return false
+}
+
+func runRegisterViaSOCKS(path, socksAddr string) error {
+    cmd := exec.Command(path, "register", "-n", "masque-plus")
+    stdin, _ := cmd.StdinPipe()
+    cmd.Stdout = os.Stdout
+    cmd.Stderr = os.Stderr
+    proxyURL := "socks5://" + socksAddr
+    env := os.Environ()
+    env = append(env,
+        "ALL_PROXY="+proxyURL,
+        "HTTPS_PROXY="+proxyURL,
+        "HTTP_PROXY="+proxyURL,
+        "NO_PROXY=",
+    )
+    cmd.Env = env
+    if err := cmd.Start(); err != nil {
+        return err
+    }
+    go func() {
+        time.Sleep(100 * time.Millisecond)
+        stdin.Write([]byte("y\n"))
+        time.Sleep(100 * time.Millisecond)
+        stdin.Write([]byte("y\n"))
+        stdin.Close()
+    }()
+    return cmd.Wait()
+}
+
+func gracefulStop(cmd *exec.Cmd, wait time.Duration) {
+    if cmd == nil || cmd.Process == nil { return }
+    _ = cmd.Process.Signal(os.Interrupt)
+    done := make(chan struct{}, 1)
+    go func() { _ = cmd.Wait(); close(done) }()
+    select {
+    case <-done:
+        return
+    case <-time.After(wait):
+        _ = cmd.Process.Kill()
+        <-done
+        return
+    }
+}
+
+func pickFreePort() (string, error) {
+    l, err := net.Listen("tcp", "127.0.0.1:0")
+    if err != nil { return "", err }
+    addr := l.Addr().(*net.TCPAddr)
+    port := strconv.Itoa(addr.Port)
+    _ = l.Close()
+    return port, nil
 }
 
 // ------------------------ Endpoint ------------------------
@@ -500,10 +658,15 @@ func handleScanner(scan *bufio.Scanner, bind string, st *procState, cmd *exec.Cm
 		line := scan.Text()
 		lower := strings.ToLower(line)
 
-		// print child lines only if verbose requested
 		if logChild {
-			logInfo(line, nil)
-		}
+            if strings.Contains(lower, "wsarecv: an existing connection was forcibly closed") ||
+            strings.Contains(lower, "wsarecv: an established connection was aborted")  ||
+            strings.Contains(lower, "datagram frame too large") {
+                // ignore noisy windows socket errors during switch
+            } else {
+                logInfo(line, nil)
+            }
+        }
 
 		st.mu.Lock()
 		switch {
