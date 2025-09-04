@@ -76,7 +76,6 @@ func main() {
 	pingFlag := flag.Bool("ping", true, "Ping each candidate before connect")
 	rtt := flag.Bool("rtt", false, "placeholder flag, not used")
 	reserved := flag.String("reserved", "", "placeholder flag, not used")
-	dns := flag.String("dns", "", "placeholder flag, not used")
 	scanPerIP := flag.Duration("scan-timeout", 5*time.Second, "Per-endpoint scan timeout (dial+handshake)")
 	scanMax := flag.Int("scan-max", 30, "Maximum number of endpoints to try during scan")
 	scanVerboseChild := flag.Bool("scan-verbose-child", false, "Print MASQUE child process logs during scan")
@@ -103,7 +102,6 @@ func main() {
 
 	_ = rtt
 	_ = reserved
-	_ = dns
 	_ = defaultTestURL
 
 	if *v4Flag && *v6Flag {
