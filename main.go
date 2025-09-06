@@ -694,9 +694,27 @@ func handleScanner(scan *bufio.Scanner, bind string, st *procState, cmd *exec.Cm
 	if tunnelFailLimit <= 0 {
 		tunnelFailLimit = 1
 	}
+
+	skipKeywords := []string{
+		"server: writeto tcp",
+		"wsarecv: an established connection was",
+		"datagram frame too large",
+	}
+
 	for scan.Scan() {
 		line := scan.Text()
 		lower := strings.ToLower(line)
+
+		skip := false
+		for _, kw := range skipKeywords {
+			if strings.Contains(lower, kw) {
+				skip = true
+				break
+			}
+		}
+		if skip {
+			continue
+		}
 
 		if logChild {
 			logInfo(line, nil)
