@@ -700,6 +700,7 @@ func handleScanner(scan *bufio.Scanner, bind string, st *procState, cmd *exec.Cm
 	skipKeywords := []string{
 		"server: not support version",
 		"server: writeto tcp",
+		"server: failed to resolve destination",
 		"wsarecv: an established connection was",
 		"datagram frame too large",
 	}
