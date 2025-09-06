@@ -531,23 +531,67 @@ func (st *procState) markConnected() {
 }
 
 func runRegister(path string) error {
-	cmd := exec.Command(path, "register", "-n", "masque-plus")
-	stdin, _ := cmd.StdinPipe()
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+    errorKeywords := []string{
+        "registering with locale",
+        "you already have a config",
+        "you must accept the terms of service",
+        "enrolling device key",
+        "successful registration",
+        "config saved",
+    }
 
-	if err := cmd.Start(); err != nil {
-		return err
-	}
+    cmd := exec.Command(path, "register", "-n", "masque-plus")
+    stdin, _ := cmd.StdinPipe()
+    stdout, _ := cmd.StdoutPipe()
+    stderr, _ := cmd.StderrPipe()
 
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		stdin.Write([]byte("y\n"))
-		time.Sleep(100 * time.Millisecond)
-		stdin.Write([]byte("y\n"))
-		stdin.Close()
-	}()
-	return cmd.Wait()
+    if err := cmd.Start(); err != nil {
+        return err
+    }
+
+    go func() {
+        scan := bufio.NewScanner(stdout)
+        for scan.Scan() {
+            line := scan.Text()
+            skip := false
+            for _, kw := range errorKeywords {
+                if strings.Contains(strings.ToLower(line), kw) {
+                    skip = true
+                    break
+                }
+            }
+            if !skip {
+                fmt.Println(line)
+            }
+        }
+    }()
+
+    go func() {
+        scan := bufio.NewScanner(stderr)
+        for scan.Scan() {
+            line := scan.Text()
+            skip := false
+            for _, kw := range errorKeywords {
+                if strings.Contains(strings.ToLower(line), kw) {
+                    skip = true
+                    break
+                }
+            }
+            if !skip {
+                fmt.Fprintln(os.Stderr, line)
+            }
+        }
+    }()
+
+    go func() {
+        time.Sleep(100 * time.Millisecond)
+        stdin.Write([]byte("y\n"))
+        time.Sleep(100 * time.Millisecond)
+        stdin.Write([]byte("y\n"))
+        stdin.Close()
+    }()
+
+    return cmd.Wait()
 }
 
 func createUsqueCmd(usquePath, config, bindIP, bindPort string, masquePort int, useV6 bool) *exec.Cmd {
