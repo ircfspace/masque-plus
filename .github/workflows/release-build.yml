@@ -81,70 +81,73 @@ jobs:
               run: |
                   mkdir -p build/masque-plus/${{ matrix.os }}_${{ matrix.arch }}
 
+                  VERSION="${GITHUB_REF#refs/tags/}"
+                  GO_LDFLAGS="-s -w -X main.Version=${VERSION}"
+
                   case "${{ matrix.os }}_${{ matrix.arch }}" in
                     windows_amd64)
                       CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
-                      go build -trimpath -ldflags="-s -w" \
+                      go build -trimpath -ldflags="${GO_LDFLAGS}" \
                       -o build/masque-plus/${{ matrix.os }}_${{ matrix.arch }}/masque-plus.exe .
                       ;;
                     windows_arm64)
                       CGO_ENABLED=0 GOOS=windows GOARCH=arm64 \
-                      go build -trimpath -ldflags="-s -w" \
+                      go build -trimpath -ldflags="${GO_LDFLAGS}" \
                       -o build/masque-plus/${{ matrix.os }}_${{ matrix.arch }}/masque-plus.exe .
                       ;;
                     darwin_amd64)
                       CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 \
-                      go build -trimpath -ldflags="-s -w" \
+                      go build -trimpath -ldflags="${GO_LDFLAGS}" \
                       -o build/masque-plus/${{ matrix.os }}_${{ matrix.arch }}/masque-plus .
                       ;;
                     darwin_arm64)
                       CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 \
-                      go build -trimpath -ldflags="-s -w" \
+                      go build -trimpath -ldflags="${GO_LDFLAGS}" \
                       -o build/masque-plus/${{ matrix.os }}_${{ matrix.arch }}/masque-plus .
                       ;;
                     linux_amd64)
                       CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-                      go build -trimpath -ldflags="-s -w" \
+                      go build -trimpath -ldflags="${GO_LDFLAGS}" \
                       -o build/masque-plus/${{ matrix.os }}_${{ matrix.arch }}/masque-plus .
                       ;;
                     linux_arm64)
                       CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
-                      go build -trimpath -ldflags="-s -w" \
+                      go build -trimpath -ldflags="${GO_LDFLAGS}" \
                       -o build/masque-plus/${{ matrix.os }}_${{ matrix.arch }}/masque-plus .
                       ;;
                     linux_armv5)
                       CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=5 \
-                      go build -trimpath -ldflags="-s -w" \
+                      go build -trimpath -ldflags="${GO_LDFLAGS}" \
                       -o build/masque-plus/${{ matrix.os }}_${{ matrix.arch }}/masque-plus .
                       ;;
                     linux_armv6)
                       CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=6 \
-                      go build -trimpath -ldflags="-s -w" \
+                      go build -trimpath -ldflags="${GO_LDFLAGS}" \
                       -o build/masque-plus/${{ matrix.os }}_${{ matrix.arch }}/masque-plus .
                       ;;
                     linux_armv7)
                       CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 \
-                      go build -trimpath -ldflags="-s -w" \
+                      go build -trimpath -ldflags="${GO_LDFLAGS}" \
                       -o build/masque-plus/${{ matrix.os }}_${{ matrix.arch }}/masque-plus .
                       ;;
                     linux_mips)
                       CGO_ENABLED=0 GOOS=linux GOARCH=mips \
-                      go build -trimpath -ldflags="-s -w" \
+                      go build -trimpath -ldflags="${GO_LDFLAGS}" \
                       -o build/masque-plus/${{ matrix.os }}_${{ matrix.arch }}/masque-plus .
                       ;;
                     linux_mipsle)
                       CGO_ENABLED=0 GOOS=linux GOARCH=mipsle \
-                      go build -trimpath -ldflags="-s -w" \
+                      go build -trimpath -ldflags="${GO_LDFLAGS}" \
                       -o build/masque-plus/${{ matrix.os }}_${{ matrix.arch }}/masque-plus .
                       ;;
                     linux_mips64)
                       CGO_ENABLED=0 GOOS=linux GOARCH=mips64 \
-                      go build -trimpath -ldflags="-s -w" \
+                      go build -trimpath -ldflags="${GO_LDFLAGS}" \
                       -o build/masque-plus/${{ matrix.os }}_${{ matrix.arch }}/masque-plus .
                       ;;
                     linux_mips64le)
                       CGO_ENABLED=0 GOOS=linux GOARCH=mips64le \
-                      go build -trimpath -ldflags="-s -w" \
+                      go build -trimpath -ldflags="${GO_LDFLAGS}" \
                       -o build/masque-plus/${{ matrix.os }}_${{ matrix.arch }}/masque-plus .
                       ;;
                     *)

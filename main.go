@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -61,9 +62,16 @@ var (
 	reconnectDelay    = 1 * time.Second
 	sni               = defaultSNI
 	useIpv6           bool
+	Version = "dev"
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
+		logutil.Msg("INFO", fmt.Sprintf("Masque-Plus Version: %s", Version), nil)
+		logutil.Msg("INFO", fmt.Sprintf("Environment: %s %s/%s", runtime.Version(), runtime.GOOS, runtime.GOARCH), nil)
+		os.Exit(0)
+	}
+
 	endpoint := flag.String("endpoint", "", "Endpoint to connect (IPv4, IPv6, domain; host or host:Port; for IPv6 with port use [IPv6]:Port)")
 	bind := flag.String("bind", defaultBind, "IP:Port to bind SOCKS proxy")
 	renew := flag.Bool("renew", false, "Force renewal of config even if config.json exists")

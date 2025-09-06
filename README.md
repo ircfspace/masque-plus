@@ -49,6 +49,7 @@ Place the `usque` binary in the same folder as this launcher (`Masque-Plus.exe` 
 | `--scan-verbose-child`     | Print MASQUE child process logs during scan.                                                                                                                            | false                                                      |
 | `--scan-tunnel-fail-limit` | Number of 'Failed to connect tunnel' occurrences before skipping an endpoint.                                                                                           | 2                                                          |
 | `--scan-ordered`           | Scan candidates in CIDR order (disable shuffling).                                                                                                                      | false                                                      |
+| `--version`                | Show the current version of the program.                                                                                                                                |                                                            |
 
 ### Usque-Specific Flags (Passed Directly to `usque socks`)
 
