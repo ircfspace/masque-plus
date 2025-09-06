@@ -81,6 +81,7 @@ func main() {
 	scanVerboseChild := flag.Bool("scan-verbose-child", false, "Print MASQUE child process logs during scan")
 	scanTunnelFailLimit := flag.Int("scan-tunnel-fail-limit", 2, "Number of 'Failed to connect tunnel' occurrences before skipping an endpoint")
 	scanOrdered := flag.Bool("scan-ordered", false, "Scan candidates in CIDR order (disable shuffling)")
+	testURL := flag.String("test-url", defaultTestURL, "URL used to verify connectivity over the SOCKS tunnel")
 
 	// usque-specific flags
 	flag.IntVar(&connectPort, "connect-port", connectPort, "Used port for MASQUE connection")
@@ -102,7 +103,7 @@ func main() {
 
 	_ = rtt
 	_ = reserved
-	_ = defaultTestURL
+	_ = testURL
 
 	if *v4Flag && *v6Flag {
 		logErrorAndExit("both -4 and -6 provided")
@@ -197,12 +198,12 @@ func main() {
 					}
 
 					bindAddr := fmt.Sprintf("%s:%s", bindIP, bindPort)
-					status, err := httpcheck.CheckWarpOverSocks(bindAddr, defaultTestURL, wcTimeout)
+					status, err := httpcheck.CheckWarpOverSocks(bindAddr, *testURL, wcTimeout)
 					fields := map[string]string{
 						"endpoint": ep,
 						"bind":     bindAddr,
 						"status":   string(status),
-						"url":      defaultTestURL,
+						"url":      *testURL,
 						"timeout":  wcTimeout.String(),
 					}
 					if err != nil {
