@@ -538,6 +538,8 @@ func runRegister(path string) error {
         "enrolling device key",
         "successful registration",
         "config saved",
+        "only use the register command",
+        "failed to open config file",
     }
 
     cmd := exec.Command(path, "register", "-n", "masque-plus")
