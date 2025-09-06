@@ -32,88 +32,23 @@ Place the `usque` binary in the same folder as this launcher (`Masque-Plus.exe` 
 
 ### Core Flags
 
-<table border="1" cellspacing="0" cellpadding="5">
-  <tr>
-    <th>Flag</th>
-    <th>Description</th>
-    <th style="max-width: 30%; word-wrap: break-word;">Default</th>
-  </tr>
-  <tr>
-    <td>--bind</td>
-    <td>IP and port to bind the local SOCKS proxy. Format: IP:Port.</td>
-    <td>127.0.0.1:1080</td>
-  </tr>
-  <tr>
-    <td>--endpoint</td>
-    <td>Required unless --scan is used. The MASQUE server endpoint to connect. Supports IPv4/IPv6/domains (e.g., 162.159.198.2:443, [2606:4700:103::2]:443, example.com:443).</td>
-    <td>-</td>
-  </tr>
-  <tr>
-    <td>--scan</td>
-    <td>Auto-select an endpoint by scanning and randomly choosing a suitable IP (respecting -4/-6).</td>
-    <td>false</td>
-  </tr>
-  <tr>
-    <td>-4</td>
-    <td>Force IPv4 endpoint selection (works with --scan or provided --endpoint).</td>
-    <td>-</td>
-  </tr>
-  <tr>
-    <td>-6</td>
-    <td>Force IPv6 endpoint selection (works with --scan or provided --endpoint).</td>
-    <td>-</td>
-  </tr>
-  <tr>
-    <td>--connect-timeout</td>
-    <td>Overall timeout for the final connect/process to be up. Accepts Go durations (e.g., 10s, 1m).</td>
-    <td>15m</td>
-  </tr>
-  <tr>
-    <td>--renew</td>
-    <td>Force renewal of the configuration even if config.json already exists.</td>
-    <td>false</td>
-  </tr>
-  <tr>
-    <td>--range4</td>
-    <td>Comma-separated IPv4 CIDRs to scan (with --scan).</td>
-    <td>162.159.192.0/24,162.159.197.0/24,162.159.198.0/24</td>
-  </tr>
-  <tr>
-    <td>--range6</td>
-    <td>Comma-separated IPv6 CIDRs to scan (with --scan).</td>
-    <td>2606:4700:103::/64</td>
-  </tr>
-  <tr>
-    <td>--ping</td>
-    <td>Ping each candidate before connect (QUIC probe).</td>
-    <td>true</td>
-  </tr>
-  <tr>
-    <td>--scan-timeout</td>
-    <td>Per-endpoint scan timeout (dial+handshake).</td>
-    <td>5s</td>
-  </tr>
-  <tr>
-    <td>--scan-max</td>
-    <td>Maximum number of endpoints to try during scan.</td>
-    <td>30</td>
-  </tr>
-  <tr>
-    <td>--scan-verbose-child</td>
-    <td>Print MASQUE child process logs during scan.</td>
-    <td>false</td>
-  </tr>
-  <tr>
-    <td>--scan-tunnel-fail-limit</td>
-    <td>Number of 'Failed to connect tunnel' occurrences before skipping an endpoint.</td>
-    <td>2</td>
-  </tr>
-  <tr>
-    <td>--scan-ordered</td>
-    <td>Scan candidates in CIDR order (disable shuffling).</td>
-    <td>false</td>
-  </tr>
-</table>
+| Flag                       | Description                                                                                                                                                             | Default                                                    |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `--bind`                   | IP and port to bind the local SOCKS proxy. Format: `IP:Port`.                                                                                                           | 127.0.0.1:1080                                             |
+| `--endpoint`               | Required unless `--scan` is used. The MASQUE server endpoint to connect. Supports IPv4/IPv6/domains (e.g., 162.159.198.2:443, [2606:4700:103::2]:443, example.com:443). | -                                                          |
+| `--scan`                   | Auto-select an endpoint by scanning and randomly choosing a suitable IP (respecting `-4`/`-6`).                                                                         | false                                                      |
+| `-4`                       | Force IPv4 endpoint selection (works with `--scan` or provided `--endpoint`).                                                                                           | -                                                          |
+| `-6`                       | Force IPv6 endpoint selection (works with `--scan` or provided `--endpoint`).                                                                                           | -                                                          |
+| `--connect-timeout`        | Overall timeout for the final connect/process to be up. Accepts Go durations (e.g., 10s, 1m).                                                                           | 15m                                                        |
+| `--renew`                  | Force renewal of the configuration even if `config.json` already exists.                                                                                                | false                                                      |
+| `--range4`                 | Comma-separated IPv4 CIDRs to scan (with `--scan`).                                                                                                                     | 162.159.192.0/24,<br>162.159.197.0/24,<br>162.159.198.0/24 |
+| `--range6`                 | Comma-separated IPv6 CIDRs to scan (with `--scan`).                                                                                                                     | 2606:4700:103::/64                                         |
+| `--ping`                   | Ping each candidate before connect (QUIC probe).                                                                                                                        | true                                                       |
+| `--scan-timeout`           | Per-endpoint scan timeout (dial+handshake).                                                                                                                             | 5s                                                         |
+| `--scan-max`               | Maximum number of endpoints to try during scan.                                                                                                                         | 30                                                         |
+| `--scan-verbose-child`     | Print MASQUE child process logs during scan.                                                                                                                            | false                                                      |
+| `--scan-tunnel-fail-limit` | Number of 'Failed to connect tunnel' occurrences before skipping an endpoint.                                                                                           | 2                                                          |
+| `--scan-ordered`           | Scan candidates in CIDR order (disable shuffling).                                                                                                                      | false                                                      |
 
 ### Usque-Specific Flags (Passed Directly to `usque socks`)
 
