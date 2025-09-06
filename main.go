@@ -42,11 +42,29 @@ var (
 	defaultConfigFile     = "./config.json"
 	defaultUsquePath      = "./usque"
 	defaultConnectTimeout = 15 * time.Minute
-	defaultTestURL        = "https://connectivity.cloudflareclient.com/cdn-cgi/trace" // kept for compatibility
+	defaultTestURL        = "https://connectivity.cloudflareclient.com/cdn-cgi/trace"
+	defaultSNI            = "consumer-masque.cloudflareclient.com"
+)
+
+var (
+	connectPort       = 443
+	dnsStr            string
+	dnsTimeout        = 2 * time.Second
+	initialPacketSize = 1242
+	keepalivePeriod   = 30 * time.Second
+	localDns          bool
+	mtu               = 1280
+	noTunnelIpv4      bool
+	noTunnelIpv6      bool
+	password          string
+	username          string
+	reconnectDelay    = 1 * time.Second
+	sni               = defaultSNI
+	useIpv6           bool
 )
 
 func main() {
-	endpoint := flag.String("endpoint", "", "Endpoint to connect (IPv4, IPv6; IP or IP:Port; for IPv6 with port use [IPv6]:Port)")
+	endpoint := flag.String("endpoint", "", "Endpoint to connect (IPv4, IPv6, domain; host or host:Port; for IPv6 with port use [IPv6]:Port)")
 	bind := flag.String("bind", defaultBind, "IP:Port to bind SOCKS proxy")
 	renew := flag.Bool("renew", false, "Force renewal of config even if config.json exists")
 	scan := flag.Bool("scan", false, "Scan/auto-select a default endpoint")
@@ -58,18 +76,33 @@ func main() {
 	pingFlag := flag.Bool("ping", true, "Ping each candidate before connect")
 	rtt := flag.Bool("rtt", false, "placeholder flag, not used")
 	reserved := flag.String("reserved", "", "placeholder flag, not used")
-	dns := flag.String("dns", "", "placeholder flag, not used")
 	scanPerIP := flag.Duration("scan-timeout", 5*time.Second, "Per-endpoint scan timeout (dial+handshake)")
 	scanMax := flag.Int("scan-max", 30, "Maximum number of endpoints to try during scan")
 	scanVerboseChild := flag.Bool("scan-verbose-child", false, "Print MASQUE child process logs during scan")
 	scanTunnelFailLimit := flag.Int("scan-tunnel-fail-limit", 2, "Number of 'Failed to connect tunnel' occurrences before skipping an endpoint")
 	scanOrdered := flag.Bool("scan-ordered", false, "Scan candidates in CIDR order (disable shuffling)")
+
+	// usque-specific flags
+	flag.IntVar(&connectPort, "connect-port", connectPort, "Used port for MASQUE connection")
+	flag.StringVar(&dnsStr, "dns", dnsStr, "comma-separated DNS servers to use")
+	flag.DurationVar(&dnsTimeout, "dns-timeout", dnsTimeout, "Timeout for DNS queries")
+	flag.IntVar(&initialPacketSize, "initial-packet-size", initialPacketSize, "Initial packet size for MASQUE connection")
+	flag.DurationVar(&keepalivePeriod, "keepalive-period", keepalivePeriod, "Keepalive period for MASQUE connection")
+	flag.BoolVar(&localDns, "local-dns", localDns, "Don't use the tunnel for DNS queries")
+	flag.IntVar(&mtu, "mtu", mtu, "MTU for MASQUE connection")
+	flag.BoolVar(&noTunnelIpv4, "no-tunnel-ipv4", noTunnelIpv4, "Disable IPv4 inside the MASQUE tunnel")
+	flag.BoolVar(&noTunnelIpv6, "no-tunnel-ipv6", noTunnelIpv6, "Disable IPv6 inside the MASQUE tunnel")
+	flag.StringVar(&password, "password", password, "Password for proxy authentication")
+	flag.StringVar(&username, "username", username, "Username for proxy authentication")
+	flag.DurationVar(&reconnectDelay, "reconnect-delay", reconnectDelay, "Delay between reconnect attempts")
+	flag.StringVar(&sni, "sni", sni, "SNI address to use for MASQUE connection")
+	flag.BoolVar(&useIpv6, "ipv6", useIpv6, "Use IPv6 for MASQUE connection")
+
 	flag.Parse()
 
 	_ = rtt
 	_ = reserved
-	_ = dns
-	_ = defaultTestURL // silence unused if not used elsewhere
+	_ = defaultTestURL
 
 	if *v4Flag && *v6Flag {
 		logErrorAndExit("both -4 and -6 provided")
@@ -87,7 +120,6 @@ func main() {
 		logInfo("scanner mode enabled", nil)
 		candidates := buildCandidatesFromFlags(*v6Flag, *v4Flag, *range4, *range6)
 
-		// NEW: shuffle candidates unless user asked for ordered scan
 		if len(candidates) > 1 && !*scanOrdered {
 			mrand.Seed(time.Now().UnixNano())
 			mrand.Shuffle(len(candidates), func(i, j int) {
@@ -103,13 +135,8 @@ func main() {
 			*endpoint = chosen
 		} else {
 			bindIP, bindPort := mustSplitBind(*bind)
-			bindAddr := fmt.Sprintf("%s:%s", bindIP, bindPort)
 
-			// startFn: spin up usque for a single endpoint and wait up to scanPerIP for success
-			// main.go (inside startFn in the --scan path)
-			// startFn: spin up usque for a single endpoint and wait up to scanPerIP for success
 			startFn := func(ep string) (func(), bool, error) {
-				// load existing config (if any) and inject endpoint
 				cmdCfg := make(map[string]interface{})
 				if data, err := os.ReadFile(configFile); err == nil {
 					_ = json.Unmarshal(data, &cmdCfg)
@@ -119,8 +146,16 @@ func main() {
 					return nil, false, err
 				}
 
-				// launch child (usque socks)
-				cmd := exec.Command(usquePath, "socks", "--config", configFile, "-b", bindIP, "-p", bindPort)
+				host, port, _ := parseEndpoint(ep)
+				localPort := 443
+				if port != "" {
+					localPort, _ = strconv.Atoi(port)
+				}
+				ip := net.ParseIP(host)
+				localIpv6 := ip != nil && ip.To4() == nil
+
+				logConfig(ep, bindIP, bindPort)
+				cmd := createUsqueCmd(usquePath, configFile, bindIP, bindPort, localPort, localIpv6)
 				stdout, _ := cmd.StdoutPipe()
 				stderr, _ := cmd.StderrPipe()
 
@@ -129,11 +164,9 @@ func main() {
 				}
 
 				st := &procState{}
-				// forward/parse child logs (respect flags)
-				go handleScanner(bufio.NewScanner(stdout), bindAddr, st, cmd, *scanVerboseChild, *scanTunnelFailLimit)
-				go handleScanner(bufio.NewScanner(stderr), bindAddr, st, cmd, *scanVerboseChild, *scanTunnelFailLimit)
+				go handleScanner(bufio.NewScanner(stdout), bindIP+":"+bindPort, st, cmd, *scanVerboseChild, *scanTunnelFailLimit)
+				go handleScanner(bufio.NewScanner(stderr), bindIP+":"+bindPort, st, cmd, *scanVerboseChild, *scanTunnelFailLimit)
 
-				// wait until connected or handshake failure or timeout
 				deadline := time.Now().Add(*scanPerIP)
 				for time.Now().Before(deadline) {
 					st.mu.Lock()
@@ -157,13 +190,13 @@ func main() {
 
 				stop := func() { _ = cmd.Process.Kill() }
 
-				// --- WARP check (no new flags, uses defaultTestURL) ---
 				if ok {
 					wcTimeout := *scanPerIP
 					if wcTimeout <= 0 || wcTimeout > 5*time.Second {
 						wcTimeout = 5 * time.Second
 					}
 
+					bindAddr := fmt.Sprintf("%s:%s", bindIP, bindPort)
 					status, err := httpcheck.CheckWarpOverSocks(bindAddr, defaultTestURL, wcTimeout)
 					fields := map[string]string{
 						"endpoint": ep,
@@ -175,30 +208,47 @@ func main() {
 					if err != nil {
 						fields["error"] = err.Error()
 						logutil.Warn("warp check result", fields)
-						// return stop, false, fmt.Errorf("warp check failed: %v", err)
 					} else {
 						logutil.Info("warp check result", fields)
-						// if status != httpcheck.StatusOK { return stop, false, fmt.Errorf("warp not on") }
 					}
 				}
-				// --- end WARP check ---
 
 				return stop, ok, nil
 			}
 
-			// cap how many endpoints we try
 			chosen, err := scanner.TryCandidates(
 				candidates,
 				*scanMax,
 				*pingFlag,
-				3*time.Second, // tcp probe timeout
-				*scanPerIP,    // informational; startFn enforces it internally
+				3*time.Second,
+				*scanPerIP,
 				startFn,
 			)
 			if err != nil {
 				logErrorAndExit(err.Error())
 			}
 			*endpoint = chosen
+		}
+	} else {
+		host, port, err := parseEndpoint(*endpoint)
+		if err != nil {
+			logErrorAndExit(fmt.Sprintf("invalid endpoint: %v", err))
+		}
+		ip := net.ParseIP(host)
+		if ip != nil {
+			isV6 := ip.To4() == nil
+			if useIpv6 != isV6 {
+				logInfo(fmt.Sprintf("warning: endpoint is IPv%d but --ipv6=%v; overriding to match endpoint", map[bool]int{true: 6, false: 4}[isV6], useIpv6), nil)
+				useIpv6 = isV6
+			}
+		} else if sni == defaultSNI {
+			sni = host
+		}
+		if port != "" {
+			p, err := strconv.Atoi(port)
+			if err == nil {
+				connectPort = p
+			}
 		}
 	}
 
@@ -211,21 +261,18 @@ func main() {
 	}
 	logInfo("successfully loaded masque identity", nil)
 
-	// Load existing config if exists
 	cfg := make(map[string]interface{})
 	if data, err := os.ReadFile(configFile); err == nil {
-		_ = json.Unmarshal(data, &cfg) // ignore parse errors for simplicity
+		_ = json.Unmarshal(data, &cfg)
 	}
 
-	// Update only endpoint fields
 	addEndpointToConfig(cfg, *endpoint)
 
-	// Write back full config
 	if err := writeConfig(configFile, cfg); err != nil {
 		logErrorAndExit(fmt.Sprintf("failed to write config: %v", err))
 	}
 
-	// Final SOCKS run (not scanning); keep child logs on and tolerate up to 3 tunnel fails
+	logConfig(*endpoint, bindIP, bindPort)
 	if err := runSocks(usquePath, configFile, bindIP, bindPort, *connectTimeout); err != nil {
 		logErrorAndExit(fmt.Sprintf("SOCKS start failed: %v", err))
 	}
@@ -234,7 +281,7 @@ func main() {
 // ------------------------ Helpers ------------------------
 
 func buildCandidatesFromFlags(v6, v4 bool, r4csv, r6csv string) []string {
-    ports := []string{
+	ports := []string{
 		"443",
 		//"500",
 		//"1701",
@@ -244,31 +291,31 @@ func buildCandidatesFromFlags(v6, v4 bool, r4csv, r6csv string) []string {
 		//"8095",
 	}
 
-    var r4, r6 []string
-    if strings.TrimSpace(r4csv) != "" {
-        r4 = splitCSV(r4csv)
-    } else {
-        r4 = append([]string{}, defaultRange4...)
-    }
-    if strings.TrimSpace(r6csv) != "" {
-        r6 = splitCSV(r6csv)
-    } else {
-        r6 = append([]string{}, defaultRange6...)
-    }
+	var r4, r6 []string
+	if strings.TrimSpace(r4csv) != "" {
+		r4 = splitCSV(r4csv)
+	} else {
+		r4 = append([]string{}, defaultRange4...)
+	}
+	if strings.TrimSpace(r6csv) != "" {
+		r6 = splitCSV(r6csv)
+	} else {
+		r6 = append([]string{}, defaultRange6...)
+	}
 
-    ver := scanner.Any
-    if v6 {
-        ver = scanner.V6
-    } else if v4 {
-        ver = scanner.V4
-    }
+	ver := scanner.Any
+	if v6 {
+		ver = scanner.V6
+	} else if v4 {
+		ver = scanner.V4
+	}
 
-    cands, err := scanner.BuildCandidates(ver, r4, r6, ports)
-    if err != nil {
-        logInfo(fmt.Sprintf("scanner.BuildCandidates error: %v", err), nil)
-        return nil
-    }
-    return cands
+	cands, err := scanner.BuildCandidates(ver, r4, r6, ports)
+	if err != nil {
+		logInfo(fmt.Sprintf("scanner.BuildCandidates error: %v", err), nil)
+		return nil
+	}
+	return cands
 }
 
 func splitCSV(s string) []string {
@@ -327,59 +374,131 @@ func writeConfig(path string, cfg map[string]interface{}) error {
 	return os.WriteFile(path, data, 0644)
 }
 
+func logConfig(endpoint, bindIP, bindPort string) {
+	fields := map[string]string{
+		"endpoint":     endpoint,
+		"bind":         fmt.Sprintf("%s:%s", bindIP, bindPort),
+		"sni":          sni,
+		"connect-port": strconv.Itoa(connectPort),
+		"ipv6":         strconv.FormatBool(useIpv6),
+		"dns":          dnsStr,
+		"dns-timeout":  dnsTimeout.String(),
+		"mtu":          strconv.Itoa(mtu),
+		"keepalive":    keepalivePeriod.String(),
+	}
+	if username != "" || password != "" {
+		fields["username"] = username
+		fields["password"] = "[set]" // avoid logging password
+	}
+	logInfo("starting usque with configuration", fields)
+}
+
 // ------------------------ Endpoint ------------------------
 
-func parseEndpoint(ep string) (net.IP, string, error) {
+func parseEndpoint(ep string) (host, port string, err error) {
 	if ep == "" {
-		return nil, "", fmt.Errorf("empty endpoint")
+		return "", "", fmt.Errorf("empty endpoint")
 	}
-	var ipStr, port string
 
-	if strings.HasPrefix(ep, "[") { // IPv6 with port [::1]:443
-		end := strings.Index(ep, "]")
+	if strings.HasPrefix(ep, "[") {
+		end := strings.LastIndex(ep, "]")
 		if end == -1 {
-			return nil, "", fmt.Errorf("invalid IPv6 format")
+			return "", "", fmt.Errorf("invalid IPv6 format")
 		}
-		ipStr = ep[1:end]
+		host = ep[1:end]
 		if len(ep) > end+1 && ep[end+1] == ':' {
 			port = ep[end+2:]
 		}
-	} else if strings.Count(ep, ":") > 1 { // plain IPv6 without port
-		ipStr = ep
-	} else if strings.Contains(ep, ":") { // IPv4:port
-		parts := strings.SplitN(ep, ":", 2)
-		ipStr = parts[0]
-		port = parts[1]
-	} else { // IPv4 without port
-		ipStr = ep
+	} else {
+		colon := strings.LastIndex(ep, ":")
+		if colon != -1 {
+			host = ep[:colon]
+			port = ep[colon+1:]
+		} else {
+			host = ep
+		}
 	}
 
-	ip := net.ParseIP(ipStr)
-	if ip == nil {
-		return nil, "", fmt.Errorf("invalid IP %q", ipStr)
+	if port != "" {
+		if err := validatePort(port); err != nil {
+			return "", "", err
+		}
 	}
-	return ip, port, nil
+
+	return host, port, nil
 }
 
 func addEndpointToConfig(cfg map[string]interface{}, endpoint string) {
-	ip, port, err := parseEndpoint(endpoint)
+	if endpoint == "" {
+		return
+	}
+
+	host, port, err := parseEndpoint(endpoint)
 	if err != nil {
 		logErrorAndExit(fmt.Sprintf("invalid endpoint: %v", err))
 	}
 
-	if ip.To4() != nil {
-		cfg["endpoint_v4"] = ip.String()
-		if port != "" {
-			cfg["endpoint_v4_port"] = port
-		}
-		logInfo("using IPv4 endpoint", nil)
-	} else {
-		cfg["endpoint_v6"] = ip.String()
-		if port != "" {
-			cfg["endpoint_v6_port"] = port
-		}
-		logInfo("using IPv6 endpoint", nil)
+	if port == "" {
+		port = "443"
 	}
+
+	ip := net.ParseIP(host)
+	if ip != nil {
+		if ip.To4() != nil {
+			cfg["endpoint_v4"] = host
+			cfg["endpoint_v4_port"] = port
+			logInfo("using IPv4 endpoint", nil)
+		} else {
+			cfg["endpoint_v6"] = host
+			cfg["endpoint_v6_port"] = port
+			logInfo("using IPv6 endpoint", nil)
+		}
+		return
+	}
+
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		logErrorAndExit(fmt.Sprintf("failed to resolve %s: %v", host, err))
+	}
+	if len(ips) == 0 {
+		logErrorAndExit(fmt.Sprintf("no IPs for %s", host))
+	}
+
+	var chosen net.IP
+	hasV4, hasV6 := false, false
+	for _, i := range ips {
+		if i.To4() != nil {
+			hasV4 = true
+		} else {
+			hasV6 = true
+		}
+	}
+
+	preferV6 := useIpv6
+	if preferV6 && !hasV6 {
+		preferV6 = false
+	} else if !preferV6 && !hasV4 {
+		preferV6 = true
+	}
+
+	for _, i := range ips {
+		if (preferV6 && i.To4() == nil) || (!preferV6 && i.To4() != nil) {
+			chosen = i
+			break
+		}
+	}
+	if chosen == nil {
+		chosen = ips[0]
+	}
+
+	isV6 := chosen.To4() == nil
+	version := "v4"
+	if isV6 {
+		version = "v6"
+	}
+	cfg["endpoint_"+version] = chosen.String()
+	cfg["endpoint_"+version+"_port"] = port
+	logInfo(fmt.Sprintf("using resolved IPv%s endpoint for %s", map[bool]string{true: "6", false: "4"}[isV6], host), nil)
 }
 
 func needRegister(configFile string, renew bool) bool {
@@ -430,8 +549,46 @@ func runRegister(path string) error {
 	return cmd.Wait()
 }
 
+func createUsqueCmd(usquePath, config, bindIP, bindPort string, masquePort int, useV6 bool) *exec.Cmd {
+	args := []string{"socks", "--config", config, "-b", bindIP, "-p", bindPort, "-P", strconv.Itoa(masquePort), "-s", sni}
+
+	if useV6 {
+		args = append(args, "-6")
+	}
+	if dnsStr != "" {
+		for _, d := range splitCSV(dnsStr) {
+			if ip := net.ParseIP(d); ip == nil {
+				logInfo(fmt.Sprintf("warning: invalid DNS server %q; ignoring", d), nil)
+				continue
+			}
+			args = append(args, "-d", d)
+		}
+	}
+	args = append(args, "-t", dnsTimeout.String())
+	args = append(args, "-i", strconv.Itoa(initialPacketSize))
+	args = append(args, "-k", keepalivePeriod.String())
+	if localDns {
+		args = append(args, "-l")
+	}
+	args = append(args, "-m", strconv.Itoa(mtu))
+	if noTunnelIpv4 {
+		args = append(args, "-F")
+	}
+	if noTunnelIpv6 {
+		args = append(args, "-S")
+	}
+	if username != "" && password != "" {
+		args = append(args, "-u", username, "-w", password)
+	} else if username != "" || password != "" {
+		logInfo("warning: both --username and --password must be provided for authentication; ignoring", nil)
+	}
+	args = append(args, "-r", reconnectDelay.String())
+
+	return exec.Command(usquePath, args...)
+}
+
 func runSocks(path, config, bindIP, bindPort string, connectTimeout time.Duration) error {
-	cmd := exec.Command(path, "socks", "--config", config, "-b", bindIP, "-p", bindPort)
+	cmd := createUsqueCmd(path, config, bindIP, bindPort, connectPort, useIpv6)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -447,7 +604,6 @@ func runSocks(path, config, bindIP, bindPort string, connectTimeout time.Duratio
 	}
 
 	state := &procState{}
-	// during final run we do want to see child logs; allow a few tunnel retries
 	go handleScanner(bufio.NewScanner(stdout), bindIP+":"+bindPort, state, cmd, true, 3)
 	go handleScanner(bufio.NewScanner(stderr), bindIP+":"+bindPort, state, cmd, true, 3)
 
@@ -476,7 +632,6 @@ func runSocks(path, config, bindIP, bindPort string, connectTimeout time.Duratio
 			state.mu.Unlock()
 
 			if connected {
-				//logInfo("Proxy is serving", map[string]string{"bind": bindIP + ":" + bindPort})
 				select {}
 			}
 
@@ -490,8 +645,6 @@ func runSocks(path, config, bindIP, bindPort string, connectTimeout time.Duratio
 	}
 }
 
-// handleScanner parses child process lines and mutates state.
-// logChild: print child raw lines if true; tunnelFailLimit: kill after N "Failed to connect tunnel" lines.
 func handleScanner(scan *bufio.Scanner, bind string, st *procState, cmd *exec.Cmd, logChild bool, tunnelFailLimit int) {
 	if tunnelFailLimit <= 0 {
 		tunnelFailLimit = 1
@@ -500,7 +653,6 @@ func handleScanner(scan *bufio.Scanner, bind string, st *procState, cmd *exec.Cm
 		line := scan.Text()
 		lower := strings.ToLower(line)
 
-		// print child lines only if verbose requested
 		if logChild {
 			logInfo(line, nil)
 		}
@@ -521,7 +673,9 @@ func handleScanner(scan *bufio.Scanner, bind string, st *procState, cmd *exec.Cm
 			st.handshakeFail = true
 			_ = cmd.Process.Kill()
 
-		case strings.Contains(lower, "invalid endpoint"):
+		case strings.Contains(lower, "invalid endpoint") ||
+			strings.Contains(lower, "invalid sni") ||
+			strings.Contains(lower, "dns resolution failed"):
 			st.endpointErr = true
 			_ = cmd.Process.Kill()
 
@@ -550,4 +704,8 @@ func logInfo(msg string, fields map[string]string) {
 	}
 	logutil.Msg("INFO", msg, fields)
 }
-func logErrorAndExit(msg string) { logutil.Msg("ERROR", msg, nil); os.Exit(1) }
+
+func logErrorAndExit(msg string) {
+	logutil.Msg("ERROR", msg, nil)
+	os.Exit(1)
+}
