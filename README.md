@@ -36,82 +36,82 @@ Place the `usque` binary in the same folder as this launcher (`Masque-Plus.exe` 
   <tr>
     <th>Flag</th>
     <th>Description</th>
-    <th width="30%">Default</th>
+    <th style="max-width: 30%; word-wrap: break-word;">Default</th>
   </tr>
   <tr>
     <td>--bind</td>
     <td>IP and port to bind the local SOCKS proxy. Format: IP:Port.</td>
-    <td width="30%">127.0.0.1:1080</td>
+    <td>127.0.0.1:1080</td>
   </tr>
   <tr>
     <td>--endpoint</td>
     <td>Required unless --scan is used. The MASQUE server endpoint to connect. Supports IPv4/IPv6/domains (e.g., 162.159.198.2:443, [2606:4700:103::2]:443, example.com:443).</td>
-    <td width="30%">-</td>
+    <td>-</td>
   </tr>
   <tr>
     <td>--scan</td>
     <td>Auto-select an endpoint by scanning and randomly choosing a suitable IP (respecting -4/-6).</td>
-    <td width="30%">false</td>
+    <td>false</td>
   </tr>
   <tr>
     <td>-4</td>
     <td>Force IPv4 endpoint selection (works with --scan or provided --endpoint).</td>
-    <td width="30%">-</td>
+    <td>-</td>
   </tr>
   <tr>
     <td>-6</td>
     <td>Force IPv6 endpoint selection (works with --scan or provided --endpoint).</td>
-    <td width="30%">-</td>
+    <td>-</td>
   </tr>
   <tr>
     <td>--connect-timeout</td>
     <td>Overall timeout for the final connect/process to be up. Accepts Go durations (e.g., 10s, 1m).</td>
-    <td width="30%">15m</td>
+    <td>15m</td>
   </tr>
   <tr>
     <td>--renew</td>
     <td>Force renewal of the configuration even if config.json already exists.</td>
-    <td width="30%">false</td>
+    <td>false</td>
   </tr>
   <tr>
     <td>--range4</td>
     <td>Comma-separated IPv4 CIDRs to scan (with --scan).</td>
-    <td width="30%">162.159.192.0/24,162.159.197.0/24,162.159.198.0/24</td>
+    <td>162.159.192.0/24,162.159.197.0/24,162.159.198.0/24</td>
   </tr>
   <tr>
     <td>--range6</td>
     <td>Comma-separated IPv6 CIDRs to scan (with --scan).</td>
-    <td width="30%">2606:4700:103::/64</td>
+    <td>2606:4700:103::/64</td>
   </tr>
   <tr>
     <td>--ping</td>
     <td>Ping each candidate before connect (QUIC probe).</td>
-    <td width="30%">true</td>
+    <td>true</td>
   </tr>
   <tr>
     <td>--scan-timeout</td>
     <td>Per-endpoint scan timeout (dial+handshake).</td>
-    <td width="30%">5s</td>
+    <td>5s</td>
   </tr>
   <tr>
     <td>--scan-max</td>
     <td>Maximum number of endpoints to try during scan.</td>
-    <td width="30%">30</td>
+    <td>30</td>
   </tr>
   <tr>
     <td>--scan-verbose-child</td>
     <td>Print MASQUE child process logs during scan.</td>
-    <td width="30%">false</td>
+    <td>false</td>
   </tr>
   <tr>
     <td>--scan-tunnel-fail-limit</td>
     <td>Number of 'Failed to connect tunnel' occurrences before skipping an endpoint.</td>
-    <td width="30%">2</td>
+    <td>2</td>
   </tr>
   <tr>
     <td>--scan-ordered</td>
     <td>Scan candidates in CIDR order (disable shuffling).</td>
-    <td width="30%">false</td>
+    <td>false</td>
   </tr>
 </table>
 
