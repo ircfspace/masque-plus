@@ -36,7 +36,7 @@ var (
 		"162.159.198.0/24",
 	}
 	defaultRange6         = []string{
-		"2606:4700:103::/64",
+		"2606:4700:102::/48",
 	}
 	defaultBind           = "127.0.0.1:1080"
 	defaultConfigFile     = "./config.json"
